@@ -110,20 +110,39 @@ const getChannelStats = asyncHandler(async (req, res) => {
 const getChannelVideos = asyncHandler(async (req, res) => {
   // TODO: Get all the videos uploaded by the channel
 
-  const page = Number(req.query.page) || 1;
-  const limit = Number(req.query.limit) || 10;
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
 
-  const channelVideos = await Video.find({
-    owner: req.user._id,
-  })
-    .select("title thumbnail views createdAt isPublished")
-    .sort({ createdAt: -1 })
-    .skip((page - 1) * limit)
-    .limit(limit);
+  const [videos, totalVideos] = await Promise.all([
+    Video.find({ owner: req.user._id })
+      .select("title thumbnail views createdAt isPublished")
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, channelVideos, "Videos fetched successfully"));
+    Video.countDocuments({
+      owner: req.user._id,
+    }),
+  ]);
+
+  const totalPages = Math.ceil(totalVideos / limit);
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        videos,
+        pagination: {
+          page,
+          limit,
+          totalVideos,
+          totalPages,
+        },
+      },
+      "Videos fetched successfully"
+    )
+  );
 });
 
 export { getChannelStats, getChannelVideos };
