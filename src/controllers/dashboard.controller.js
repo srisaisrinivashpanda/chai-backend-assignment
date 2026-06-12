@@ -8,6 +8,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { count } from "console";
 import { channel } from "diagnostics_channel";
 import { lookup } from "dns";
+import { pipeline } from "stream";
 
 const getChannelStats = asyncHandler(async (req, res) => {
   // TODO: Get the channel stats like total video views, total subscribers, total videos, total likes etc.
@@ -66,7 +67,7 @@ const getChannelStats = asyncHandler(async (req, res) => {
     },
   ]); */
 
-  const channelStats = await Video.aggregate([
+  /* const channelStats = await Video.aggregate([
     {
       $match: {
         owner: new mongoose.Types.ObjectId(req.user._id),
@@ -113,34 +114,100 @@ const getChannelStats = asyncHandler(async (req, res) => {
 
   const totalViews = stats.totalViews || 0;
   const totalVideos = stats.totalVideos || 0;
-  const totalLikes = stats.totalLikes || 0;
+  const totalLikes = stats.totalLikes || 0; */
 
-  //Use aggregate for multiple stages this ao works but mehh
+  //More optimized version
+  //since A doesnt depend on B and vice vers
+  const ownerId = new mongoose.Types.ObjectId(req.user._id);
 
-  // const subscribersStats = await Subscription.aggregate([
-  //   {
-  //     $match: {
-  //       channel: new mongoose.Types.ObjectId(req.user._id),
-  //     },
-  //   },
-  //   {
-  //     $count: "totalSubscribers",
-  //   },
-  // ]);
+  const [videoStats, totalSubscribers] = await Promise.all([
+    Video.aggregate([
+      {
+        $match: {
+          owner: ownerId,
+        },
+      },
+      {
+        $lookup: {
+          from: "likes",
 
-  const totalSubscribers = await Subscription.countDocuments({
-    channel: req.user._id,
-  });
+          //Variable that stores the current video's _id
+          let: {
+            videoId: "$_id",
+          },
 
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(
-        200,
-        { totalViews, totalVideos, totalSubscribers, totalLikes },
-        "Channel stats fetched successfully"
-      )
-    );
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $eq: ["$video", "$$videoId"], // likes.video == video._id
+                },
+              },
+            },
+            {
+              $count: "totalLikes", //total like of that video
+            },
+          ],
+
+          as: "likesAggregate",
+        },
+      },
+      {
+        $addFields: {
+          likesCount: {
+            $ifNull: [
+              {
+                $first: "$likesAggregate.totalLikes",
+              },
+              0,
+            ],
+          },
+        },
+      },
+      {
+        $project: {
+          likesAggregate: 0,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+
+          totalViews: {
+            $sum: "$views",
+          },
+
+          totalVideos: {
+            $sum: 1,
+          },
+
+          totalLikes: {
+            $sum: "$likesCount",
+          },
+        },
+      },
+    ]),
+    Subscription.countDocuments({
+      channel: ownerId,
+    }),
+  ]);
+
+  const stats = videoStats[0] || {
+    totalViews: 0,
+    totalVideos: 0,
+    totalLikes: 0,
+  };
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        ...stats,
+        totalSubscribers,
+      },
+      "Channel stats fetched successfully"
+    )
+  );
 });
 
 const getChannelVideos = asyncHandler(async (req, res) => {
