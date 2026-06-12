@@ -11,7 +11,9 @@ import { lookup } from "dns";
 
 const getChannelStats = asyncHandler(async (req, res) => {
   // TODO: Get the channel stats like total video views, total subscribers, total videos, total likes etc.
-  const viewsStats = await Video.aggregate([
+
+  //Since all of them uses video combine them
+  /*   const viewsStats = await Video.aggregate([
     {
       $match: {
         owner: new mongoose.Types.ObjectId(req.user._id),
@@ -27,13 +29,13 @@ const getChannelStats = asyncHandler(async (req, res) => {
     },
   ]);
 
-  const totalViews = viewsStats[0]?.totalViews || 0;
+  const totalViews = viewsStats[0]?.totalViews || 0; */
 
-  const totalVideos = await Video.countDocuments({
+  /*   const totalVideos = await Video.countDocuments({
     owner: req.user._id,
-  });
+  }); */
 
-  const totalLikes = await Video.aggregate([
+  /*   const totalLikes = await Video.aggregate([
     {
       $match: {
         owner: new mongoose.Types.ObjectId(req.user._id),
@@ -62,7 +64,56 @@ const getChannelStats = asyncHandler(async (req, res) => {
         },
       },
     },
+  ]); */
+
+  const channelStats = await Video.aggregate([
+    {
+      $match: {
+        owner: new mongoose.Types.ObjectId(req.user._id),
+      },
+    },
+    {
+      $lookup: {
+        from: "likes",
+        localField: "_id",
+        foreignField: "video",
+        as: "likes",
+      },
+    },
+    {
+      $addFields: {
+        likesCount: {
+          $size: "$likes",
+        },
+      },
+    },
+    {
+      $project: {
+        views: 1,
+        likesCount: 1,
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        totalViews: {
+          $sum: "$views",
+        },
+        totalVideos: {
+          $sum: 1,
+        },
+        totalLikes: {
+          $sum: "$likesCount",
+        },
+      },
+    },
   ]);
+
+  const stats = channelStats[0] || {};
+
+  const totalViews = stats.totalViews || 0;
+  const totalVideos = stats.totalVideos || 0;
+  const totalLikes = stats.totalLikes || 0;
 
   //Use aggregate for multiple stages this ao works but mehh
 
